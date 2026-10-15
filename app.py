@@ -1,7 +1,8 @@
 """Personal Finance Dashboard
 
-Upload a bank statement CSV, auto-categorise transactions with keyword rules
-stored in categories.json, edit categories inline, and visualise spending.
+Upload a bank statement (CSV, Excel or PDF), auto-categorise transactions
+with keyword rules stored in categories.json, edit categories inline, and
+visualise spending.
 
 Run with:  streamlit run app.py
 """
@@ -10,6 +11,7 @@ import json
 import re
 from pathlib import Path
 
+import pymupdf  # PyMuPDF
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -38,6 +40,12 @@ COLUMN_ALIASES = {
 }
 
 DATE_FORMATS = ["%d-%b-%y", "%d-%b-%Y", "%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%d %b %Y", "%d %B %Y"]
+
+# Patterns for pulling transactions out of the text layer of a PDF statement
+PDF_DATE_RE = re.compile(
+    r"(\d{1,2}[-/ ](?:[A-Za-z]{3,9}|\d{1,2})[-/ ]\d{2,4}|\d{4}-\d{1,2}-\d{1,2})"
+)
+PDF_AMOUNT_RE = re.compile(r"(?<![\d.,])[(\-+]?[\d,]+(?:\.\d+)?\)?\s*(?:CR|DR)?$", re.IGNORECASE)
 
 
 # ----------------------------------------------------------------------------
@@ -92,6 +100,66 @@ def read_csv_safely(uploaded_file) -> pd.DataFrame:
         except pd.errors.EmptyDataError:
             raise ValueError("The CSV has no columns or rows to read.")
     raise ValueError(f"Could not decode the file: {last_error}")
+
+
+def read_excel_safely(uploaded_file) -> pd.DataFrame:
+    if uploaded_file.size == 0:
+        raise ValueError("The uploaded file is empty.")
+    uploaded_file.seek(0)
+    try:
+        return pd.read_excel(uploaded_file)
+    except Exception as e:
+        raise ValueError(f"Could not read the Excel file: {e}")
+
+
+def _parse_pdf_text(text: str) -> pd.DataFrame:
+    """Pull Date/Details/Amount rows out of the text layer of a PDF."""
+    rows = []
+    for line in text.splitlines():
+        line = " ".join(line.split())
+        date_match = PDF_DATE_RE.search(line)
+        if not date_match:
+            continue
+        amount_match = PDF_AMOUNT_RE.search(line, date_match.end())
+        if not amount_match:
+            continue
+        details = line[date_match.end():amount_match.start()].strip(" .-")
+        if not details:
+            continue
+        amount_text = amount_match.group(0).strip()
+        amount = re.sub(r"\s*(?:CR|DR)$", "", amount_text, flags=re.IGNORECASE).strip()
+        if amount_text.upper().endswith("DR") and not amount.startswith("-"):
+            amount = f"-{amount}"
+        rows.append({"Date": date_match.group(0), "Details": details, "Amount": amount})
+    return pd.DataFrame(rows, columns=["Date", "Details", "Amount"])
+
+
+def read_pdf_safely(uploaded_file) -> pd.DataFrame:
+    if uploaded_file.size == 0:
+        raise ValueError("The uploaded file is empty.")
+    uploaded_file.seek(0)
+    try:
+        with pymupdf.open(stream=uploaded_file.read(), filetype="pdf") as doc:
+            text = "\n".join(page.get_text() for page in doc)
+    except Exception as e:
+        raise ValueError(f"Could not read the PDF: {e}")
+    df = _parse_pdf_text(text)
+    if df.empty:
+        raise ValueError(
+            "No transactions were found in the PDF. Upload a text-based bank "
+            "statement (scanned/image PDFs are not supported)."
+        )
+    return df
+
+
+def read_uploaded_file(uploaded_file) -> pd.DataFrame:
+    """Pick the right reader based on the uploaded file's extension."""
+    suffix = Path(getattr(uploaded_file, "name", "") or "").suffix.lower()
+    if suffix in (".xls", ".xlsx"):
+        return read_excel_safely(uploaded_file)
+    if suffix == ".pdf":
+        return read_pdf_safely(uploaded_file)
+    return read_csv_safely(uploaded_file)
 
 
 def _find_column(columns, key):
@@ -347,18 +415,22 @@ def main():
     if "flash" in st.session_state:
         st.success(st.session_state.pop("flash"))
 
-    uploaded = st.file_uploader("Upload your bank statement (CSV)", type=["csv"])
+    uploaded = st.file_uploader(
+        "Upload your bank statement (CSV, Excel or PDF)",
+        type=["csv", "xls", "xlsx", "pdf"],
+    )
     if uploaded is None:
-        st.info("Upload a CSV with Date, Details, Amount and Debit/Credit columns to get started.")
+        st.info("Upload a CSV, Excel or PDF statement with Date, Details, Amount and "
+                "Debit/Credit columns to get started.")
         return
 
     file_id = f"{uploaded.name}-{uploaded.size}"
     if st.session_state.get("file_id") != file_id:
         try:
-            df, warnings = clean_data(read_csv_safely(uploaded))
+            df, warnings = clean_data(read_uploaded_file(uploaded))
         except Exception as e:
             st.session_state.pop("file_id", None)
-            st.error(f"Error loading CSV file: {e}")
+            st.error(f"Error loading file: {e}")
             return
         st.session_state.df = categorize_data(df, st.session_state.categories)
         st.session_state.file_id = file_id
