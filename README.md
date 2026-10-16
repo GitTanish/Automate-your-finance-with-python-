@@ -1,12 +1,13 @@
 # Personal Finance Dashboard
 
-An interactive finance dashboard built with Streamlit, Pandas and Plotly. Upload a bank or credit card statement CSV and the app cleans the data, separates expenses from payments, auto-categorises transactions using keyword rules and visualises your spending.
+An interactive finance dashboard built with Streamlit, Pandas and Plotly. Upload a bank or credit card statement as CSV, Excel (`.xls` / `.xlsx`) or PDF and the app cleans the data, separates expenses from payments, auto-categorises transactions using keyword rules and visualises your spending.
 
 Everything runs locally so your statements stay on your machine.
 
 ## Project Details
 
 - **Automatic data cleaning:** trims column names, parses dates, and converts amounts with commas, currency symbols, negatives or `(parentheses)` into numbers
+- **Multiple statement formats:** CSV, Excel (`.xls`, `.xlsx`) and text-based PDF statements all feed the same cleaning and categorisation pipeline
 - **Expenses vs. payments:** debits and credits are split into separate tabs so card payments don't inflate your spending
 - **Rule-based categorisation:** transaction descriptions are matched against keywords stored in `categories.json`
 - **Inline editing:** change a category from a dropdown, click **Apply & Save Changes**, and the app learns the merchant for future uploads
@@ -21,6 +22,7 @@ Everything runs locally so your statements stay on your machine.
 | Language | Python 3.10+ |
 | UI framework | Streamlit |
 | Data processing | Pandas |
+| Excel / PDF parsing | openpyxl, xlrd, PyMuPDF |
 | Visualisation | Plotly Express |
 | Rule storage | Local `categories.json` |
 
@@ -45,14 +47,22 @@ The app opens at <http://localhost:8501>.
 
 ### Using the dashboard
 
-1. Upload your bank statement CSV.
+1. Upload your bank statement (CSV, Excel or PDF).
 2. Check the metric cards: total expenses, payments received, and uncategorised count.
 3. In the **Expenses (Debits)** tab, find rows marked `Uncategorized`, pick a category from the dropdown and click **Apply & Save Changes**.
 4. Use **Add a new category** to create your own categories.
 5. Scroll down for the summary table and pie chart. Click legend items to hide or show categories.
 6. Open the **Payments & Income (Credits)** tab to see card payments and money received.
 
-### CSV format
+### Supported formats
+
+| Format | Notes |
+|---|---|
+| CSV | UTF-8 (with or without BOM) or Latin-1 encoding |
+| Excel | `.xls` and `.xlsx`; the first sheet is read |
+| PDF | Text-based (digital) statements only; scanned/image-only PDFs are not supported |
+
+### Statement columns (CSV / Excel)
 
 | Column | Required | Notes |
 |---|---|---|
@@ -61,6 +71,8 @@ The app opens at <http://localhost:8501>.
 | `Amount` | Yes | Commas, currency symbols and negatives are handled |
 | `Debit/Credit` | No | If missing, negative amounts are treated as debits |
 | `Currency` | No | Used for display, e.g. `AED` |
+
+For PDFs, each transaction must be on its own line containing a date, a description and an amount, optionally followed by `CR`/`DR` (e.g. `28-Feb-25 Card Payment 18,551.62 CR`). `DR` amounts are treated as debits, everything else as credits.
 
 Example:
 

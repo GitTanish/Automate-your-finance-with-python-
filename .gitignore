@@ -1,8 +1,12 @@
 venv/
+.venv/
 __pycache__/
+.pytest_cache/
+.deepeval/
 *.csv
 !sample_bank_statement.csv
 *.xlsx
 *.xls
 *.pdf
 categories.json
+categories.json.bak
